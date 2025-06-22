@@ -15,7 +15,12 @@ export type Database = {
           created_at: string
           id: string
           package_id: string
+          payment_method: string | null
+          payment_reference: string | null
+          payment_status: string | null
           status: string
+          total_amount: number | null
+          travel_date: string | null
           user_id: string
         }
         Insert: {
@@ -23,7 +28,12 @@ export type Database = {
           created_at?: string
           id?: string
           package_id: string
+          payment_method?: string | null
+          payment_reference?: string | null
+          payment_status?: string | null
           status?: string
+          total_amount?: number | null
+          travel_date?: string | null
           user_id: string
         }
         Update: {
@@ -31,7 +41,12 @@ export type Database = {
           created_at?: string
           id?: string
           package_id?: string
+          payment_method?: string | null
+          payment_reference?: string | null
+          payment_status?: string | null
           status?: string
+          total_amount?: number | null
+          travel_date?: string | null
           user_id?: string
         }
         Relationships: [

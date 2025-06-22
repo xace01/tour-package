@@ -55,7 +55,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               .eq('id', session.user.id)
               .single();
             
-            setProfile(profileData);
+            if (profileData) {
+              setProfile({
+                id: profileData.id,
+                email: profileData.email,
+                name: profileData.name,
+                role: profileData.role as 'admin' | 'customer'
+              });
+            }
             setLoading(false);
           }, 0);
         } else {

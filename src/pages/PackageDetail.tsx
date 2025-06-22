@@ -1,12 +1,15 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, DollarSign, Heart, Star, Calendar } from 'lucide-react';
+import { MapPin, Clock, DollarSign, Heart, Star, Calendar, CreditCard } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 
 interface Package {
@@ -43,6 +46,8 @@ const PackageDetail = () => {
   const [rating, setRating] = useState(5);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [booking, setBooking] = useState(false);
+  const [showBookingDialog, setShowBookingDialog] = useState(false);
+  const [travelDate, setTravelDate] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -82,7 +87,7 @@ const PackageDetail = () => {
         .from('reviews')
         .select(`
           *,
-          profiles:user_id (name)
+          profiles!inner(name)
         `)
         .eq('package_id', id)
         .order('created_at', { ascending: false });
@@ -107,7 +112,6 @@ const PackageDetail = () => {
 
       setIsFavorite(!!data);
     } catch (error) {
-      // No favorite found
       setIsFavorite(false);
     }
   };
@@ -151,11 +155,11 @@ const PackageDetail = () => {
     }
   };
 
-  const handleBooking = async () => {
-    if (!user) {
+  const handleBookingSubmit = async () => {
+    if (!user || !pkg || !travelDate) {
       toast({
-        title: "Please sign in",
-        description: "You need to be signed in to book packages.",
+        title: "Missing information",
+        description: "Please select a travel date",
         variant: "destructive"
       });
       return;
@@ -168,6 +172,8 @@ const PackageDetail = () => {
         .insert([{
           user_id: user.id,
           package_id: id,
+          travel_date: travelDate,
+          total_amount: pkg.price,
           status: 'pending'
         }]);
 
@@ -177,6 +183,8 @@ const PackageDetail = () => {
         title: "Booking successful!",
         description: "Your booking has been submitted and is pending confirmation."
       });
+      setShowBookingDialog(false);
+      setTravelDate('');
     } catch (error: any) {
       toast({
         title: "Booking failed",
@@ -186,6 +194,83 @@ const PackageDetail = () => {
     } finally {
       setBooking(false);
     }
+  };
+
+  const initializeKhaltiPayment = () => {
+    if (!pkg || !travelDate) {
+      toast({
+        title: "Missing information",
+        description: "Please select a travel date first",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Khalti payment integration
+    const config = {
+      publicKey: "test_public_key_dc74e0fd57cb46cd93832aee0a507256",
+      productIdentity: pkg.id,
+      productName: pkg.title,
+      productUrl: window.location.href,
+      paymentPreference: [
+        "KHALTI",
+        "EBANKING",
+        "MOBILE_BANKING",
+        "CONNECT_IPS",
+        "SCT",
+      ],
+      eventHandler: {
+        onSuccess: async (payload: any) => {
+          console.log("Payment successful:", payload);
+          
+          // Save booking with payment info
+          try {
+            const { error } = await supabase
+              .from('bookings')
+              .insert([{
+                user_id: user!.id,
+                package_id: id,
+                travel_date: travelDate,
+                total_amount: pkg.price,
+                payment_status: 'completed',
+                payment_method: 'khalti',
+                payment_reference: payload.token,
+                status: 'confirmed'
+              }]);
+
+            if (error) throw error;
+
+            toast({
+              title: "Payment successful!",
+              description: "Your booking has been confirmed."
+            });
+            setShowBookingDialog(false);
+            setTravelDate('');
+          } catch (error: any) {
+            toast({
+              title: "Error saving booking",
+              description: error.message,
+              variant: "destructive"
+            });
+          }
+        },
+        onError: (error: any) => {
+          console.log("Payment error:", error);
+          toast({
+            title: "Payment failed",
+            description: "Please try again or contact support.",
+            variant: "destructive"
+          });
+        },
+        onClose: () => {
+          console.log("Payment widget closed");
+        }
+      }
+    };
+
+    // @ts-ignore
+    const checkout = new KhaltiCheckout(config);
+    checkout.show({ amount: pkg.price * 100 }); // Amount in paisa
   };
 
   const submitReview = async () => {
@@ -245,9 +330,19 @@ const PackageDetail = () => {
     ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length 
     : 0;
 
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const minDate = tomorrow.toISOString().split('T')[0];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
+      
+      {/* Khalti script */}
+      <script 
+        src="https://khalti.s3.ap-south-1.amazonaws.com/KPG/dist/2020.12.17.0.0.0/khalti-checkout.ejs.min.js"
+        async
+      ></script>
       
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -321,14 +416,64 @@ const PackageDetail = () => {
               </p>
 
               {user && (
-                <Button
-                  onClick={handleBooking}
-                  disabled={booking}
-                  className="w-full bg-green-600 hover:bg-green-700 text-lg py-3"
-                >
-                  <Calendar className="h-5 w-5 mr-2" />
-                  {booking ? 'Booking...' : 'Book Now'}
-                </Button>
+                <Dialog open={showBookingDialog} onOpenChange={setShowBookingDialog}>
+                  <DialogTrigger asChild>
+                    <Button
+                      className="w-full bg-green-600 hover:bg-green-700 text-lg py-3"
+                    >
+                      <Calendar className="h-5 w-5 mr-2" />
+                      Book Now
+                    </Button>
+                  </DialogTrigger>
+                  
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Book {pkg.title}</DialogTitle>
+                    </DialogHeader>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Travel Date
+                        </label>
+                        <Input
+                          type="date"
+                          value={travelDate}
+                          onChange={(e) => setTravelDate(e.target.value)}
+                          min={minDate}
+                          required
+                        />
+                      </div>
+                      
+                      <div className="bg-gray-50 p-4 rounded-lg">
+                        <div className="flex justify-between items-center text-lg font-semibold">
+                          <span>Total Amount:</span>
+                          <span className="text-green-600">${pkg.price}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex space-x-2">
+                        <Button
+                          onClick={handleBookingSubmit}
+                          disabled={booking || !travelDate}
+                          variant="outline"
+                          className="flex-1"
+                        >
+                          {booking ? 'Booking...' : 'Book Later (Pay on Arrival)'}
+                        </Button>
+                        
+                        <Button
+                          onClick={initializeKhaltiPayment}
+                          disabled={!travelDate}
+                          className="flex-1 bg-purple-600 hover:bg-purple-700"
+                        >
+                          <CreditCard className="h-4 w-4 mr-2" />
+                          Pay with Khalti
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               )}
 
               {!user && (
